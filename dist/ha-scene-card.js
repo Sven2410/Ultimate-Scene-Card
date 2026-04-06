@@ -1,5 +1,5 @@
 /**
- * HA Scene Card — v1.2.1
+ * HA Scene Card — v1.3.0
  * Compacte Lovelace kaart voor scene-beheer per ruimte
  *
  * Configuratie:
@@ -19,7 +19,7 @@
  *   scene3_name: Nacht             (standaard: Scene 3)
  */
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 
 const DEFAULTS = {
   icons: ['mdi:walk', 'mdi:candle', 'mdi:lightbulb-on'],
@@ -127,13 +127,43 @@ class HaSceneCard extends HTMLElement {
     });
   }
 
-  // Flash-feedback — altijd via click zodat flash en activering
-  // nooit uit sync kunnen raken op mobiel.
   _flashBtn(btn) {
     btn.classList.remove('flash');
-    void btn.offsetWidth; // forceer reflow zodat animatie herstart
+    void btn.offsetWidth;
     btn.classList.add('flash');
     btn.addEventListener('animationend', () => btn.classList.remove('flash'), { once: true });
+  }
+
+  // ── Tap-handler: betrouwbaar op zowel mobiel als desktop ────
+  //
+  // Het probleem op mobiel: na een tap "houdt" de browser het aangetikte
+  // element vast als hover-doel. De volgende tap op een andere knop begint
+  // met het unhover-en van de eerste knop, en het click-event op de tweede
+  // knop wordt daardoor soms nooit afgeleverd.
+  //
+  // Oplossing: luister naar touchend (mobiel) en click (desktop) apart.
+  // Bij touchend roepen we preventDefault() aan — dit stopt de browser
+  // met het nabootsen van muisevents (mouseover, mouseenter, click) na
+  // de touch, zodat de hover-vasthouding en ghost-clicks verdwijnen.
+  // Een vlag voorkomt dat de gesimuleerde click daarna nog doorkomt.
+
+  _addTapListener(el, handler) {
+    let pendingTouch = false;
+
+    el.addEventListener('touchend', (e) => {
+      // Annuleer alle nagesimuleerde muisevents en ghost-click
+      e.preventDefault();
+      pendingTouch = true;
+      // Vlag resetten na de volledige event-simulatie-cyclus (~500ms)
+      setTimeout(() => { pendingTouch = false; }, 500);
+      handler();
+    }, { passive: false });
+
+    el.addEventListener('click', () => {
+      // Alleen uitvoeren als het geen touch-gegenereerde click is
+      if (pendingTouch) return;
+      handler();
+    });
   }
 
   // ── Kaart renderen ──────────────────────────────────────────
@@ -164,6 +194,7 @@ class HaSceneCard extends HTMLElement {
           height: 56px;
           box-sizing: border-box;
           overflow: hidden;
+          -webkit-tap-highlight-color: transparent;
         }
 
         .btn {
@@ -178,21 +209,13 @@ class HaSceneCard extends HTMLElement {
           border-radius: 10px;
           color: var(--secondary-text-color);
           --mdc-icon-size: 22px;
-
-          /* Voorkomt 300ms tap-vertraging en dubbeltik-zoom op mobiel.
-             Cruciaal: zonder dit kan click op de tweede knop worden
-             geblokkeerd door de browser na een eerste tap. */
           touch-action: manipulation;
-
-          /* Geen native tap-highlight op iOS/Android */
           -webkit-tap-highlight-color: transparent;
           outline: none;
           user-select: none;
           -webkit-user-select: none;
         }
 
-        /* Flash bij klik: lichte highlight die vanzelf wegfadet.
-           Geen forwards fill = geen blijvende kleur na afloop. */
         @keyframes btnflash {
           0%   { background: color-mix(in srgb, var(--primary-color, #03a9f4) 25%, transparent); }
           60%  { background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, transparent); }
@@ -203,7 +226,6 @@ class HaSceneCard extends HTMLElement {
           animation: btnflash 0.4s ease-out;
         }
 
-        /* Dunne scheider tussen scenes en potlood */
         .sep {
           width: 1px;
           height: 22px;
@@ -218,26 +240,24 @@ class HaSceneCard extends HTMLElement {
             <ha-icon icon="${icons[n - 1]}"></ha-icon>
           </button>
         `).join('')}
-
         <div class="sep"></div>
-
         <button class="btn" id="ebtn" title="Scenes aanpassen">
           <ha-icon icon="mdi:pencil"></ha-icon>
         </button>
       </ha-card>
     `;
 
-    // Alles op één click-event: flash + activering tegelijk.
-    // Geen pointerdown/touchstart combinatie — dat veroorzaakte op
-    // mobiel dat het tweede click-event soms niet meer aankwam.
     this.shadowRoot.querySelectorAll('.btn[data-n]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      this._addTapListener(btn, () => {
         this._flashBtn(btn);
         this._activateScene(parseInt(btn.dataset.n));
       });
     });
 
-    this.shadowRoot.getElementById('ebtn').addEventListener('click', () => this._openModal());
+    this._addTapListener(
+      this.shadowRoot.getElementById('ebtn'),
+      () => this._openModal()
+    );
   }
 
   // ── Modal ───────────────────────────────────────────────────
@@ -300,119 +320,81 @@ class HaSceneCard extends HTMLElement {
     modal.innerHTML = `
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-
         #sheet {
           background: var(--card-background-color, #fafafa);
           border-radius: 24px 24px 0 0;
-          width: 100%;
-          max-width: 520px;
-          max-height: 88vh;
-          overflow-y: auto;
+          width: 100%; max-width: 520px;
+          max-height: 88vh; overflow-y: auto;
           font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
           padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
         }
-
         .handle {
-          width: 40px; height: 4px;
-          border-radius: 2px;
+          width: 40px; height: 4px; border-radius: 2px;
           background: var(--divider-color, #ddd);
           margin: 14px auto 0;
         }
-
         .hdr { padding: 16px 20px 0; }
         .hdr h3 { font-size: 18px; font-weight: 600; color: var(--primary-text-color); }
-
         .tabs {
-          display: flex;
-          padding: 14px 20px 0;
+          display: flex; padding: 14px 20px 0;
           border-bottom: 1px solid var(--divider-color, #e0e0e0);
         }
         .tab {
-          flex: 1; text-align: center;
-          padding: 8px 4px;
+          flex: 1; text-align: center; padding: 8px 4px;
           font-size: 13px; font-weight: 500;
-          color: var(--secondary-text-color);
-          cursor: pointer;
+          color: var(--secondary-text-color); cursor: pointer;
           touch-action: manipulation;
           border-bottom: 2px solid transparent;
           transition: color .2s, border-color .2s;
         }
         .tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
-
         .lights { padding: 4px 20px; }
-
         .lrow { padding: 13px 0; border-bottom: 1px solid var(--divider-color, #ebebeb); }
         .lrow:last-child { border-bottom: none; }
-
         .lhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .linfo { display: flex; align-items: center; gap: 8px; }
-
         .licon { --mdc-icon-size: 16px; }
         .licon.on  { color: var(--primary-color); }
         .licon.off { color: var(--disabled-text-color, #bbb); }
-
         .lname { font-size: 14px; font-weight: 500; color: var(--primary-text-color); }
-
         .lval { font-size: 13px; font-weight: 600; min-width: 34px; text-align: right; }
         .lval.on  { color: var(--primary-color); }
         .lval.off { color: var(--disabled-text-color, #aaa); }
-
         .slider {
           -webkit-appearance: none;
-          width: 100%; height: 6px;
-          border-radius: 3px;
-          outline: none;
-          cursor: pointer;
-          touch-action: pan-x;
+          width: 100%; height: 6px; border-radius: 3px;
+          outline: none; cursor: pointer; touch-action: pan-x;
         }
         .slider::-webkit-slider-thumb {
           -webkit-appearance: none;
-          width: 22px; height: 22px;
-          border-radius: 50%;
+          width: 22px; height: 22px; border-radius: 50%;
           background: var(--primary-color);
-          box-shadow: 0 1px 4px rgba(0,0,0,.25);
-          cursor: pointer;
+          box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: pointer;
         }
         .slider::-moz-range-thumb {
-          width: 22px; height: 22px;
-          border: none; border-radius: 50%;
+          width: 22px; height: 22px; border: none; border-radius: 50%;
           background: var(--primary-color);
-          box-shadow: 0 1px 4px rgba(0,0,0,.25);
-          cursor: pointer;
+          box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: pointer;
         }
-
         .footer { padding: 14px 20px 0; display: flex; flex-direction: column; gap: 10px; }
-
         .btn-preview {
-          padding: 11px;
-          border: 1.5px solid var(--primary-color);
-          border-radius: 12px;
-          background: none;
-          font-size: 14px; font-weight: 500;
-          color: var(--primary-color);
-          cursor: pointer;
-          touch-action: manipulation;
+          padding: 11px; border: 1.5px solid var(--primary-color);
+          border-radius: 12px; background: none;
+          font-size: 14px; font-weight: 500; color: var(--primary-color);
+          cursor: pointer; touch-action: manipulation;
         }
-
         .btn-row { display: flex; gap: 10px; }
-
         .btn-cancel {
           flex: 1; padding: 13px;
-          border: 1px solid var(--divider-color, #ddd);
-          border-radius: 12px;
-          background: none;
-          font-size: 15px; font-weight: 500;
-          color: var(--secondary-text-color);
-          cursor: pointer;
+          border: 1px solid var(--divider-color, #ddd); border-radius: 12px;
+          background: none; font-size: 15px; font-weight: 500;
+          color: var(--secondary-text-color); cursor: pointer;
           touch-action: manipulation;
         }
         .btn-save {
-          flex: 2; padding: 13px;
-          border: none; border-radius: 12px;
-          background: var(--primary-color);
-          font-size: 15px; font-weight: 600;
-          color: #fff; cursor: pointer;
-          touch-action: manipulation;
+          flex: 2; padding: 13px; border: none; border-radius: 12px;
+          background: var(--primary-color); font-size: 15px; font-weight: 600;
+          color: #fff; cursor: pointer; touch-action: manipulation;
         }
         .btn-save:active { opacity: .85; }
       </style>
@@ -420,15 +402,12 @@ class HaSceneCard extends HTMLElement {
       <div id="sheet">
         <div class="handle"></div>
         <div class="hdr"><h3>Scenes aanpassen</h3></div>
-
         <div class="tabs">
           ${[1, 2, 3].map(n =>
             `<div class="tab${n === tab ? ' active' : ''}" data-tab="${n}">${sceneNames[n - 1]}</div>`
           ).join('')}
         </div>
-
         <div class="lights">${slidersHTML}</div>
-
         <div class="footer">
           <button class="btn-preview" id="btn-preview">▶&nbsp; Voorbeeld bekijken</button>
           <div class="btn-row">
@@ -444,10 +423,12 @@ class HaSceneCard extends HTMLElement {
 
     modal.querySelectorAll('.slider').forEach(s => this._setSliderBg(s, parseFloat(s.value)));
 
+    // Klik buiten sheet sluit modal
+    this._addTapListener(modal, (e) => { if (e && e.target === modal) this._closeModal(); });
     modal.addEventListener('click', e => { if (e.target === modal) this._closeModal(); });
 
     modal.querySelectorAll('.tab').forEach(t => {
-      t.addEventListener('click', () => {
+      this._addTapListener(t, () => {
         this._editTab = parseInt(t.dataset.tab);
         this._buildModal();
       });
@@ -459,7 +440,6 @@ class HaSceneCard extends HTMLElement {
         const v = Math.round(parseFloat(slider.value));
         this._tempValues[this._editTab][i] = v;
         this._setSliderBg(slider, v);
-
         const row  = slider.closest('.lrow');
         const icon = row.querySelector('.licon');
         const val  = row.querySelector('.lval');
@@ -477,13 +457,13 @@ class HaSceneCard extends HTMLElement {
       });
     });
 
-    modal.querySelector('#btn-preview').addEventListener('click', () => {
+    this._addTapListener(modal.querySelector('#btn-preview'), () => {
       this._activateScene(this._editTab, this._tempValues[this._editTab]);
     });
 
-    modal.querySelector('#btn-cancel').addEventListener('click', () => this._closeModal());
+    this._addTapListener(modal.querySelector('#btn-cancel'), () => this._closeModal());
 
-    modal.querySelector('#btn-save').addEventListener('click', () => {
+    this._addTapListener(modal.querySelector('#btn-save'), () => {
       this._scenes = {
         1: [...this._tempValues[1]],
         2: [...this._tempValues[2]],
