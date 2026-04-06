@@ -21,12 +21,17 @@ class HaSceneCardEditor extends HTMLElement {
     this._hass = null;
   }
 
-  set hass(hass) { this._hass = hass; this._render(); }
+  set hass(hass) { const first = !this._hass; this._hass = hass; if (first) this._render(); }
 
   setConfig(config) {
+    const prevLen = this._config?.lights?.length ?? -1;
     this._config = { lights: [], ...config };
     if (!Array.isArray(this._config.lights)) this._config.lights = [];
-    this._render();
+    // Alleen re-renderen bij structuurwijziging of eerste render.
+    // Niet bij gewone waardeveranderingen — anders verliest de gebruiker focus.
+    if (prevLen === -1 || prevLen !== this._config.lights.length) {
+      this._render();
+    }
   }
 
   _fire() {
@@ -167,15 +172,16 @@ class HaSceneCardEditor extends HTMLElement {
       sel.addEventListener('change', e => {
         const i = parseInt(e.target.dataset.idx);
         this._config.lights[i] = { ...this._config.lights[i], entity: e.target.value };
-        this._fire();
+        this._fire(); // geen _render()
       });
     });
 
     this.querySelectorAll('.inp-name').forEach(inp => {
-      inp.addEventListener('change', e => {
+      // input event: live updaten terwijl je typt
+      inp.addEventListener('input', e => {
         const i = parseInt(e.target.dataset.idx);
         this._config.lights[i] = { ...this._config.lights[i], name: e.target.value };
-        this._fire();
+        this._fire(); // geen _render()
       });
     });
 
@@ -183,22 +189,24 @@ class HaSceneCardEditor extends HTMLElement {
       btn.addEventListener('click', e => {
         const i = parseInt(e.currentTarget.dataset.idx);
         this._config.lights.splice(i, 1);
-        this._fire(); this._render();
+        this._fire(); // setConfig ziet lengte verandering → _render()
       });
     });
 
     this.querySelector('#btn-add').addEventListener('click', () => {
       this._config.lights.push({ entity: '', name: '' });
-      this._fire(); this._render();
-      const rows = this.querySelectorAll('.light-row');
-      rows[rows.length - 1]?.scrollIntoView({ behavior: 'smooth' });
+      this._fire(); // setConfig ziet lengte verandering → _render()
+      setTimeout(() => {
+        const rows = this.querySelectorAll('.light-row');
+        rows[rows.length - 1]?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
     });
 
     this.querySelectorAll('.inp-sname').forEach(inp => {
-      inp.addEventListener('change', e => {
+      inp.addEventListener('input', e => {
         const key = e.target.dataset.key;
         this._config[key] = e.target.value || undefined;
-        this._fire();
+        this._fire(); // geen _render()
       });
     });
   }
