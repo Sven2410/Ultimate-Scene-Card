@@ -23,7 +23,12 @@ class HaSceneCardEditor extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
-    if (first) this._render();
+    if (first) {
+      this._render();
+    } else {
+      // Geef bestaande pickers de nieuwe hass mee zonder volledige re-render
+      this.querySelectorAll('ha-entity-picker').forEach(p => { p.hass = hass; });
+    }
   }
 
   setConfig(config) {
@@ -41,16 +46,30 @@ class HaSceneCardEditor extends HTMLElement {
     }));
   }
 
-  // Maak een ha-entity-picker en stop hem in een container-element
+  // Maak een ha-entity-picker en stop hem in een container-element.
+  // Na een pagina-herlaad is ha-entity-picker soms nog niet geregistreerd
+  // door HA's lazy loading. Wacht dan tot hij beschikbaar is.
   _makePicker(container, value, domains, onChange) {
-    const picker = document.createElement('ha-entity-picker');
-    picker.hass           = this._hass;
-    picker.value          = value || '';
-    picker.includeDomains = domains;
-    picker.allowCustomEntity = false;
-    picker.style.cssText  = 'display:block;width:100%';
-    picker.addEventListener('value-changed', e => onChange(e.detail.value));
-    container.appendChild(picker);
+    const create = () => {
+      const picker = document.createElement('ha-entity-picker');
+      picker.hass            = this._hass;
+      picker.value           = value || '';
+      picker.includeDomains  = domains;
+      picker.allowCustomEntity = false;
+      picker.style.cssText   = 'display:block;width:100%';
+      picker.addEventListener('value-changed', e => onChange(e.detail.value));
+      container.innerHTML = '';
+      container.appendChild(picker);
+    };
+
+    if (customElements.get('ha-entity-picker')) {
+      // Component al beschikbaar (normaal geval tijdens sessie)
+      create();
+    } else {
+      // Na pagina-herlaad: toon tijdelijke placeholder en wacht op registratie
+      container.innerHTML = `<div style="height:48px;display:flex;align-items:center;padding:0 4px;font-size:13px;color:var(--secondary-text-color)">Laden…</div>`;
+      customElements.whenDefined('ha-entity-picker').then(create);
+    }
   }
 
   _render() {
