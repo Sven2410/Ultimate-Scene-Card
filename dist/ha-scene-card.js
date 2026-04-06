@@ -1,10 +1,9 @@
 /**
- * HA Scene Card
+ * HA Scene Card — v1.1.0
  * Compacte Lovelace kaart voor scene-beheer per ruimte
  *
  * Configuratie:
  *   type: custom:ha-scene-card
- *   room: Woonkamer
  *   lights:
  *     - entity: light.woonkamer_plafond
  *       name: Plafond
@@ -20,7 +19,7 @@
  *   scene3_name: Nacht             (standaard: Scene 3)
  */
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 const DEFAULTS = {
   icons: ['mdi:walk', 'mdi:candle', 'mdi:lightbulb-on'],
@@ -31,20 +30,18 @@ class HaSceneCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass        = null;
-    this._config      = null;
-    this._activeScene = null;
-    this._modal       = null;
-    this._editTab     = 1;
-    this._tempValues  = null;
-    this._scenes      = null;
+    this._hass       = null;
+    this._config     = null;
+    this._modal      = null;
+    this._editTab    = 1;
+    this._tempValues = null;
+    this._scenes     = null;
   }
 
   // ── Lovelace vereisten ──────────────────────────────────────
 
   static getStubConfig() {
     return {
-      room: 'Woonkamer',
       lights: [
         { entity: 'light.voorbeeld_lamp_1', name: 'Plafond' },
         { entity: 'light.voorbeeld_lamp_2', name: 'Vloerlamp' },
@@ -74,16 +71,14 @@ class HaSceneCard extends HTMLElement {
     this._closeModal();
   }
 
-  // ── Opslag (localStorage, persistent per tablet/kiosk) ──────
+  // ── Opslag ─────────────────────────────────────────────────
+  // Sleutel is gebaseerd op de eerste lamp-entity (uniek per ruimte)
 
   get _storageKey() {
-    const slug = (this._config.room || 'room')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_|_$/g, '');
-    return `ha_scene_card_v1_${slug}`;
+    const base = (this._config.lights[0]?.entity || 'light')
+      .replace(/\./g, '_')
+      .replace(/[^a-z0-9_]/gi, '');
+    return `ha_scene_card_v1_${base}`;
   }
 
   _defaultScenes() {
@@ -96,7 +91,7 @@ class HaSceneCard extends HTMLElement {
       const raw = localStorage.getItem(this._storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        const n = this._config.lights.length;
+        const n    = this._config.lights.length;
         const defs = this._defaultScenes();
         this._scenes = {};
         for (let s = 1; s <= 3; s++) {
@@ -118,10 +113,10 @@ class HaSceneCard extends HTMLElement {
   }
 
   // ── Scene activeren ─────────────────────────────────────────
+  // Puur een actie — geen actieve/toggle staat
 
   _activateScene(num, values) {
     if (!this._hass) return;
-    this._activeScene = num;
     const vals = values || this._scenes[num];
     this._config.lights.forEach((light, i) => {
       const pct = Math.round(vals[i] ?? 0);
@@ -134,13 +129,12 @@ class HaSceneCard extends HTMLElement {
         });
       }
     });
-    this._refreshBtns();
   }
 
-  _refreshBtns() {
-    this.shadowRoot.querySelectorAll('.sbtn').forEach(btn => {
-      btn.classList.toggle('active', parseInt(btn.dataset.n) === this._activeScene);
-    });
+  // Korte visuele klik-bevestiging, verdwijnt daarna vanzelf
+  _flashBtn(btn) {
+    btn.classList.add('flash');
+    setTimeout(() => btn.classList.remove('flash'), 380);
   }
 
   // ── Kaart renderen ──────────────────────────────────────────
@@ -159,7 +153,6 @@ class HaSceneCard extends HTMLElement {
       cfg.scene2_name || DEFAULTS.names[1],
       cfg.scene3_name || DEFAULTS.names[2],
     ];
-    const room = cfg.room || 'Kamer';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -168,82 +161,70 @@ class HaSceneCard extends HTMLElement {
         ha-card {
           display: flex;
           align-items: center;
-          padding: 10px 12px;
+          padding: 10px 4px;
           height: 56px;
           box-sizing: border-box;
           overflow: hidden;
         }
 
-        .scenes {
-          display: flex;
-          gap: 4px;
-          align-items: center;
-          flex-shrink: 0;
-        }
-
-        .sbtn {
-          position: relative;
-          width: 36px; height: 36px;
-          border-radius: 50%;
-          border: none;
-          background: var(--secondary-background-color);
-          cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-          color: var(--secondary-text-color);
-          transition: background .2s, color .2s, box-shadow .2s;
-          --mdc-icon-size: 18px;
-          flex-shrink: 0;
-        }
-        .sbtn:hover {
-          background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, transparent);
-          color: var(--primary-color);
-        }
-        .sbtn.active {
-          background: var(--primary-color);
-          color: #fff;
-          box-shadow: 0 2px 8px color-mix(in srgb, var(--primary-color, #03a9f4) 40%, transparent);
-        }
-
-        .room {
+        /* Scene-knoppen en palet-knop verdelen de volledige breedte gelijkmatig */
+        .sbtn, .ebtn {
           flex: 1;
-          font-size: 14px;
-          font-weight: 500;
-          color: var(--primary-text-color);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          padding: 0 10px;
-        }
-
-        .ebtn {
-          width: 36px; height: 36px;
-          border-radius: 50%;
+          height: 36px;
           border: none;
           background: none;
           cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 10px;
           color: var(--secondary-text-color);
-          flex-shrink: 0;
+          transition: background .15s, color .15s;
+          --mdc-icon-size: 22px;
+        }
+
+        .sbtn:hover {
+          background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, transparent);
+          color: var(--primary-color);
+        }
+
+        /* Flash bij klik — tijdelijk, geen blijvende staat */
+        @keyframes btnflash {
+          0%   { background: color-mix(in srgb, var(--primary-color, #03a9f4) 28%, transparent);
+                 color: var(--primary-color); }
+          100% { background: none; color: var(--secondary-text-color); }
+        }
+        .sbtn.flash {
+          animation: btnflash .38s ease-out forwards;
+        }
+
+        /* Palet-knop iets subtieler */
+        .ebtn {
           --mdc-icon-size: 20px;
-          transition: background .2s, color .2s;
+          color: var(--disabled-text-color, #aaa);
         }
         .ebtn:hover {
-          background: var(--secondary-background-color);
+          background: color-mix(in srgb, var(--primary-color, #03a9f4) 10%, transparent);
           color: var(--primary-color);
+        }
+
+        /* Dunne scheider tussen scenes en palet-knop */
+        .sep {
+          width: 1px;
+          height: 22px;
+          background: var(--divider-color, #e0e0e0);
+          flex-shrink: 0;
         }
       </style>
 
       <ha-card>
-        <div class="scenes">
-          ${[1, 2, 3].map(n => `
-            <button class="sbtn${this._activeScene === n ? ' active' : ''}"
-                    data-n="${n}" title="${names[n - 1]}">
-              <ha-icon icon="${icons[n - 1]}"></ha-icon>
-            </button>
-          `).join('')}
-        </div>
+        ${[1, 2, 3].map(n => `
+          <button class="sbtn" data-n="${n}" title="${names[n - 1]}">
+            <ha-icon icon="${icons[n - 1]}"></ha-icon>
+          </button>
+        `).join('')}
 
-        <span class="room">${room}</span>
+        <div class="sep"></div>
 
         <button class="ebtn" id="ebtn" title="Scenes aanpassen">
           <ha-icon icon="mdi:palette"></ha-icon>
@@ -252,15 +233,19 @@ class HaSceneCard extends HTMLElement {
     `;
 
     this.shadowRoot.querySelectorAll('.sbtn').forEach(btn => {
-      btn.addEventListener('click', () => this._activateScene(parseInt(btn.dataset.n)));
+      btn.addEventListener('click', () => {
+        this._flashBtn(btn);
+        this._activateScene(parseInt(btn.dataset.n));
+      });
     });
+
     this.shadowRoot.getElementById('ebtn').addEventListener('click', () => this._openModal());
   }
 
   // ── Modal ───────────────────────────────────────────────────
 
   _openModal() {
-    this._editTab = this._activeScene || 1;
+    this._editTab = 1;
     this._tempValues = {
       1: [...this._scenes[1]],
       2: [...this._scenes[2]],
@@ -277,7 +262,6 @@ class HaSceneCard extends HTMLElement {
     this._closeModal();
 
     const lights = this._config.lights;
-    const room   = this._config.room || 'Kamer';
     const tab    = this._editTab;
     const vals   = this._tempValues[tab];
 
@@ -301,7 +285,7 @@ class HaSceneCard extends HTMLElement {
     const slidersHTML = lights.map((light, i) => {
       const v = Math.round(vals[i] ?? 0);
       return `
-        <div class="lrow" data-idx="${i}">
+        <div class="lrow">
           <div class="lhead">
             <div class="linfo">
               <ha-icon class="licon ${v > 0 ? 'on' : 'off'}"
@@ -340,7 +324,6 @@ class HaSceneCard extends HTMLElement {
 
         .hdr { padding: 16px 20px 0; }
         .hdr h3 { font-size: 18px; font-weight: 600; color: var(--primary-text-color); }
-        .hdr p  { font-size: 13px; color: var(--secondary-text-color); margin-top: 2px; }
 
         .tabs {
           display: flex;
@@ -409,9 +392,10 @@ class HaSceneCard extends HTMLElement {
           font-size: 14px; font-weight: 500;
           color: var(--primary-color);
           cursor: pointer;
-          transition: background .15s;
         }
-        .btn-preview:hover { background: color-mix(in srgb, var(--primary-color) 8%, transparent); }
+        .btn-preview:hover {
+          background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+        }
 
         .btn-row { display: flex; gap: 10px; }
 
@@ -440,7 +424,6 @@ class HaSceneCard extends HTMLElement {
 
         <div class="hdr">
           <h3>Scenes aanpassen</h3>
-          <p>${room}</p>
         </div>
 
         <div class="tabs">
@@ -464,10 +447,7 @@ class HaSceneCard extends HTMLElement {
     document.body.appendChild(modal);
     this._modal = modal;
 
-    // Slider achtergronden initialiseren
     modal.querySelectorAll('.slider').forEach(s => this._setSliderBg(s, parseFloat(s.value)));
-
-    // ── Events ──
 
     // Klik buiten sheet → sluiten
     modal.addEventListener('click', e => { if (e.target === modal) this._closeModal(); });
@@ -483,8 +463,8 @@ class HaSceneCard extends HTMLElement {
     // Sliders
     modal.querySelectorAll('.slider').forEach(slider => {
       slider.addEventListener('input', () => {
-        const i   = parseInt(slider.dataset.idx);
-        const v   = Math.round(parseFloat(slider.value));
+        const i = parseInt(slider.dataset.idx);
+        const v = Math.round(parseFloat(slider.value));
         this._tempValues[this._editTab][i] = v;
         this._setSliderBg(slider, v);
 
@@ -505,7 +485,7 @@ class HaSceneCard extends HTMLElement {
       });
     });
 
-    // Voorbeeld (tijdelijk activeren zonder opslaan)
+    // Voorbeeld — activeer zonder opslaan
     modal.querySelector('#btn-preview').addEventListener('click', () => {
       this._activateScene(this._editTab, this._tempValues[this._editTab]);
     });
@@ -513,7 +493,7 @@ class HaSceneCard extends HTMLElement {
     // Annuleren
     modal.querySelector('#btn-cancel').addEventListener('click', () => this._closeModal());
 
-    // Opslaan: alle 3 scenes opslaan en huidige tab activeren
+    // Opslaan — sla alle 3 scenes op en activeer huidige tab
     modal.querySelector('#btn-save').addEventListener('click', () => {
       this._scenes = {
         1: [...this._tempValues[1]],
@@ -537,7 +517,6 @@ class HaSceneCard extends HTMLElement {
 
 customElements.define('ha-scene-card', HaSceneCard);
 
-// Registreer voor Lovelace card picker
 window.customCards = window.customCards || [];
 window.customCards.push({
   type:        'ha-scene-card',
