@@ -1,5 +1,5 @@
 /**
- * HA Scene Card — v1.1.0
+ * HA Scene Card — v1.2.1
  * Compacte Lovelace kaart voor scene-beheer per ruimte
  *
  * Configuratie:
@@ -19,7 +19,7 @@
  *   scene3_name: Nacht             (standaard: Scene 3)
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.1';
 
 const DEFAULTS = {
   icons: ['mdi:walk', 'mdi:candle', 'mdi:lightbulb-on'],
@@ -37,8 +37,6 @@ class HaSceneCard extends HTMLElement {
     this._tempValues = null;
     this._scenes     = null;
   }
-
-  // ── Lovelace vereisten ──────────────────────────────────────
 
   static getStubConfig() {
     return {
@@ -72,7 +70,6 @@ class HaSceneCard extends HTMLElement {
   }
 
   // ── Opslag ─────────────────────────────────────────────────
-  // Sleutel is gebaseerd op de eerste lamp-entity (uniek per ruimte)
 
   get _storageKey() {
     const base = (this._config.lights[0]?.entity || 'light')
@@ -113,7 +110,6 @@ class HaSceneCard extends HTMLElement {
   }
 
   // ── Scene activeren ─────────────────────────────────────────
-  // Puur een actie — geen actieve/toggle staat
 
   _activateScene(num, values) {
     if (!this._hass) return;
@@ -131,10 +127,13 @@ class HaSceneCard extends HTMLElement {
     });
   }
 
-  // Korte visuele klik-bevestiging, verdwijnt daarna vanzelf
+  // Flash-feedback — altijd via click zodat flash en activering
+  // nooit uit sync kunnen raken op mobiel.
   _flashBtn(btn) {
+    btn.classList.remove('flash');
+    void btn.offsetWidth; // forceer reflow zodat animatie herstart
     btn.classList.add('flash');
-    setTimeout(() => btn.classList.remove('flash'), 380);
+    btn.addEventListener('animationend', () => btn.classList.remove('flash'), { once: true });
   }
 
   // ── Kaart renderen ──────────────────────────────────────────
@@ -167,8 +166,7 @@ class HaSceneCard extends HTMLElement {
           overflow: hidden;
         }
 
-        /* Scene-knoppen en palet-knop verdelen de volledige breedte gelijkmatig */
-        .sbtn, .ebtn {
+        .btn {
           flex: 1;
           height: 36px;
           border: none;
@@ -179,36 +177,33 @@ class HaSceneCard extends HTMLElement {
           justify-content: center;
           border-radius: 10px;
           color: var(--secondary-text-color);
-          transition: background .15s, color .15s;
           --mdc-icon-size: 22px;
+
+          /* Voorkomt 300ms tap-vertraging en dubbeltik-zoom op mobiel.
+             Cruciaal: zonder dit kan click op de tweede knop worden
+             geblokkeerd door de browser na een eerste tap. */
+          touch-action: manipulation;
+
+          /* Geen native tap-highlight op iOS/Android */
+          -webkit-tap-highlight-color: transparent;
+          outline: none;
+          user-select: none;
+          -webkit-user-select: none;
         }
 
-        .sbtn:hover {
-          background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, transparent);
-          color: var(--primary-color);
-        }
-
-        /* Flash bij klik — tijdelijk, geen blijvende staat */
+        /* Flash bij klik: lichte highlight die vanzelf wegfadet.
+           Geen forwards fill = geen blijvende kleur na afloop. */
         @keyframes btnflash {
-          0%   { background: color-mix(in srgb, var(--primary-color, #03a9f4) 28%, transparent);
-                 color: var(--primary-color); }
-          100% { background: none; color: var(--secondary-text-color); }
-        }
-        .sbtn.flash {
-          animation: btnflash .38s ease-out forwards;
+          0%   { background: color-mix(in srgb, var(--primary-color, #03a9f4) 25%, transparent); }
+          60%  { background: color-mix(in srgb, var(--primary-color, #03a9f4) 15%, transparent); }
+          100% { background: transparent; }
         }
 
-        /* Palet-knop iets subtieler */
-        .ebtn {
-          --mdc-icon-size: 20px;
-          color: var(--disabled-text-color, #aaa);
-        }
-        .ebtn:hover {
-          background: color-mix(in srgb, var(--primary-color, #03a9f4) 10%, transparent);
-          color: var(--primary-color);
+        .btn.flash {
+          animation: btnflash 0.4s ease-out;
         }
 
-        /* Dunne scheider tussen scenes en palet-knop */
+        /* Dunne scheider tussen scenes en potlood */
         .sep {
           width: 1px;
           height: 22px;
@@ -219,20 +214,23 @@ class HaSceneCard extends HTMLElement {
 
       <ha-card>
         ${[1, 2, 3].map(n => `
-          <button class="sbtn" data-n="${n}" title="${names[n - 1]}">
+          <button class="btn" data-n="${n}" title="${names[n - 1]}">
             <ha-icon icon="${icons[n - 1]}"></ha-icon>
           </button>
         `).join('')}
 
         <div class="sep"></div>
 
-        <button class="ebtn" id="ebtn" title="Scenes aanpassen">
-          <ha-icon icon="mdi:palette"></ha-icon>
+        <button class="btn" id="ebtn" title="Scenes aanpassen">
+          <ha-icon icon="mdi:pencil"></ha-icon>
         </button>
       </ha-card>
     `;
 
-    this.shadowRoot.querySelectorAll('.sbtn').forEach(btn => {
+    // Alles op één click-event: flash + activering tegelijk.
+    // Geen pointerdown/touchstart combinatie — dat veroorzaakte op
+    // mobiel dat het tweede click-event soms niet meer aankwam.
+    this.shadowRoot.querySelectorAll('.btn[data-n]').forEach(btn => {
       btn.addEventListener('click', () => {
         this._flashBtn(btn);
         this._activateScene(parseInt(btn.dataset.n));
@@ -261,11 +259,10 @@ class HaSceneCard extends HTMLElement {
   _buildModal() {
     this._closeModal();
 
-    const lights = this._config.lights;
-    const tab    = this._editTab;
-    const vals   = this._tempValues[tab];
-
-    const cfg = this._config;
+    const lights     = this._config.lights;
+    const tab        = this._editTab;
+    const vals       = this._tempValues[tab];
+    const cfg        = this._config;
     const sceneNames = [
       cfg.scene1_name || DEFAULTS.names[0],
       cfg.scene2_name || DEFAULTS.names[1],
@@ -336,6 +333,7 @@ class HaSceneCard extends HTMLElement {
           font-size: 13px; font-weight: 500;
           color: var(--secondary-text-color);
           cursor: pointer;
+          touch-action: manipulation;
           border-bottom: 2px solid transparent;
           transition: color .2s, border-color .2s;
         }
@@ -365,6 +363,7 @@ class HaSceneCard extends HTMLElement {
           border-radius: 3px;
           outline: none;
           cursor: pointer;
+          touch-action: pan-x;
         }
         .slider::-webkit-slider-thumb {
           -webkit-appearance: none;
@@ -392,9 +391,7 @@ class HaSceneCard extends HTMLElement {
           font-size: 14px; font-weight: 500;
           color: var(--primary-color);
           cursor: pointer;
-        }
-        .btn-preview:hover {
-          background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+          touch-action: manipulation;
         }
 
         .btn-row { display: flex; gap: 10px; }
@@ -407,6 +404,7 @@ class HaSceneCard extends HTMLElement {
           font-size: 15px; font-weight: 500;
           color: var(--secondary-text-color);
           cursor: pointer;
+          touch-action: manipulation;
         }
         .btn-save {
           flex: 2; padding: 13px;
@@ -414,17 +412,14 @@ class HaSceneCard extends HTMLElement {
           background: var(--primary-color);
           font-size: 15px; font-weight: 600;
           color: #fff; cursor: pointer;
-          transition: opacity .15s;
+          touch-action: manipulation;
         }
         .btn-save:active { opacity: .85; }
       </style>
 
       <div id="sheet">
         <div class="handle"></div>
-
-        <div class="hdr">
-          <h3>Scenes aanpassen</h3>
-        </div>
+        <div class="hdr"><h3>Scenes aanpassen</h3></div>
 
         <div class="tabs">
           ${[1, 2, 3].map(n =>
@@ -449,10 +444,8 @@ class HaSceneCard extends HTMLElement {
 
     modal.querySelectorAll('.slider').forEach(s => this._setSliderBg(s, parseFloat(s.value)));
 
-    // Klik buiten sheet → sluiten
     modal.addEventListener('click', e => { if (e.target === modal) this._closeModal(); });
 
-    // Tabs wisselen
     modal.querySelectorAll('.tab').forEach(t => {
       t.addEventListener('click', () => {
         this._editTab = parseInt(t.dataset.tab);
@@ -460,7 +453,6 @@ class HaSceneCard extends HTMLElement {
       });
     });
 
-    // Sliders
     modal.querySelectorAll('.slider').forEach(slider => {
       slider.addEventListener('input', () => {
         const i = parseInt(slider.dataset.idx);
@@ -485,15 +477,12 @@ class HaSceneCard extends HTMLElement {
       });
     });
 
-    // Voorbeeld — activeer zonder opslaan
     modal.querySelector('#btn-preview').addEventListener('click', () => {
       this._activateScene(this._editTab, this._tempValues[this._editTab]);
     });
 
-    // Annuleren
     modal.querySelector('#btn-cancel').addEventListener('click', () => this._closeModal());
 
-    // Opslaan — sla alle 3 scenes op en activeer huidige tab
     modal.querySelector('#btn-save').addEventListener('click', () => {
       this._scenes = {
         1: [...this._tempValues[1]],
