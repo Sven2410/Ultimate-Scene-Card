@@ -189,13 +189,21 @@ class HaSceneCardEditor extends HTMLElement {
       btn.addEventListener('click', e => {
         const i = parseInt(e.currentTarget.dataset.idx);
         this._config.lights.splice(i, 1);
-        this._fire(); // setConfig ziet lengte verandering → _render()
+        // Direct renderen zodat de rij meteen verdwijnt.
+        // _fire() daarna: HA roept setConfig aan, maar prevLen === newLen
+        // dus geen dubbele render.
+        this._render();
+        this._fire();
       });
     });
 
     this.querySelector('#btn-add').addEventListener('click', () => {
       this._config.lights.push({ entity: '', name: '' });
-      this._fire(); // setConfig ziet lengte verandering → _render()
+      // Direct renderen: de nieuwe rij is meteen zichtbaar.
+      // Zonder dit zag setConfig geen lengteverschil (push had _config al bijgewerkt)
+      // en werd _render() nooit aangeroepen.
+      this._render();
+      this._fire();
       setTimeout(() => {
         const rows = this.querySelectorAll('.light-row');
         rows[rows.length - 1]?.scrollIntoView({ behavior: 'smooth' });
