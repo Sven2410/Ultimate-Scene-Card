@@ -18,42 +18,37 @@ class HaSceneCardEditor extends HTMLElement {
     super();
     this._config = { lights: [] };
     this._hass   = null;
-    this._ready  = false;
   }
 
   set hass(hass) {
+    const first = !this._hass;
     this._hass = hass;
-    if (!this._ready) this._init();
-    else this.querySelectorAll('ha-entity-picker').forEach(p => p.hass = hass);
+    if (first) this._render();
   }
 
   setConfig(config) {
     const prevLen = this._config?.lights?.length ?? -1;
     this._config  = { lights: [], ...config };
     if (!Array.isArray(this._config.lights)) this._config.lights = [];
-    if (!this._ready) this._init();
-    else if (prevLen !== this._config.lights.length) this._render();
-  }
-
-  _init() {
-    if (!this._hass || this._ready) return;
-    this._ready = true;
-    this._render();
+    // Alleen opnieuw renderen bij structuurwijziging (lamp toevoegen/verwijderen)
+    if (prevLen === -1 || prevLen !== this._config.lights.length) this._render();
   }
 
   _fire() {
     this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: { ...this._config } }, bubbles: true, composed: true,
+      detail: { config: { ...this._config } },
+      bubbles: true, composed: true,
     }));
   }
 
+  // Maak een ha-entity-picker en stop hem in een container-element
   _makePicker(container, value, domains, onChange) {
     const picker = document.createElement('ha-entity-picker');
-    picker.hass              = this._hass;
-    picker.value             = value || '';
-    picker.includeDomains    = domains;
+    picker.hass           = this._hass;
+    picker.value          = value || '';
+    picker.includeDomains = domains;
     picker.allowCustomEntity = false;
-    picker.style.cssText     = 'display:block;width:100%';
+    picker.style.cssText  = 'display:block;width:100%';
     picker.addEventListener('value-changed', e => onChange(e.detail.value));
     container.appendChild(picker);
   }
@@ -98,7 +93,7 @@ class HaSceneCardEditor extends HTMLElement {
         }
       </style>
 
-      ${!cfg.storage_entity ? '<div class="warn">⚠ Selecteer eerst een Text helper.</div>' : ''}
+      ${!cfg.storage_entity ? `<div class="warn">⚠ Selecteer eerst een Text helper.</div>` : ''}
 
       <div class="section">
         <label class="label">Text helper (opslag scenes)</label>
@@ -123,12 +118,16 @@ class HaSceneCardEditor extends HTMLElement {
           `).join('')}
         </div>
         <button class="btn-add" id="btn-add">+ Lamp toevoegen</button>
-      </div>`;
+      </div>
+    `;
 
-    // Text helper picker
+    // ── HA entity pickers invoegen ──
+
+    // Text helper picker (input_text domein)
     this._makePicker(
       this.querySelector('#storage-slot'),
-      cfg.storage_entity, ['input_text'],
+      cfg.storage_entity,
+      ['input_text'],
       val => { this._config.storage_entity = val || undefined; this._fire(); }
     );
 
@@ -136,12 +135,14 @@ class HaSceneCardEditor extends HTMLElement {
     lights.forEach((l, i) => {
       this._makePicker(
         this.querySelector(`#light-slot-${i}`),
-        l.entity, ['light'],
+        l.entity,
+        ['light'],
         val => { this._config.lights[i] = { ...this._config.lights[i], entity: val }; this._fire(); }
       );
     });
 
-    // Naam inputs
+    // ── Overige events ──
+
     this.querySelectorAll('.inp-name').forEach(inp => {
       inp.addEventListener('input', e => {
         const i = parseInt(e.target.dataset.idx);
@@ -150,7 +151,6 @@ class HaSceneCardEditor extends HTMLElement {
       });
     });
 
-    // Verwijder knoppen
     this.querySelectorAll('.btn-del').forEach(btn => {
       btn.addEventListener('click', e => {
         this._config.lights.splice(parseInt(e.currentTarget.dataset.idx), 1);
@@ -158,7 +158,6 @@ class HaSceneCardEditor extends HTMLElement {
       });
     });
 
-    // Lamp toevoegen
     this.querySelector('#btn-add').addEventListener('click', () => {
       this._config.lights.push({ entity: '', name: '' });
       this._render(); this._fire();
@@ -169,8 +168,7 @@ class HaSceneCardEditor extends HTMLElement {
     });
   }
 }
-if (!customElements.get('ha-scene-card-editor'))
-  customElements.define('ha-scene-card-editor', HaSceneCardEditor);
+
 customElements.define('ha-scene-card-editor', HaSceneCardEditor);
 
 
@@ -510,8 +508,7 @@ class HaSceneCard extends HTMLElement {
   }
 }
 
-if (!customElements.get('ha-scene-card'))
-  customElements.define('ha-scene-card', HaSceneCard);
+customElements.define('ha-scene-card', HaSceneCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
